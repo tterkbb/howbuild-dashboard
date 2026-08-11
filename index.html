@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>건축물 용도별 공사비 대시보드 – 하우빌드</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+/* ================================================================
+   전역
+   ================================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+    height: 100%; margin: 0;
+    font-family: 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+    background: #fff; color: #2C3E50;
+}
+
+/* ================================================================
+   화면 전환 (대시보드 ↔ 계산기)
+   ================================================================ */
+#dashboardView, #calcView {
+    transition: opacity 0.35s ease, transform 0.35s ease;
+}
+#dashboardView {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+}
+#calcView {
+    display: none; opacity: 0; transform: translateY(24px);
+}
+#calcView.visible {
+    display: block; opacity: 1; transform: translateY(0);
+}
+/* 대시보드 뒤로가기 */
+.back-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 14px; font-weight: 600; color: #3E6B99;
+    background: none; border: none; cursor: pointer;
+    padding: 4px 0; margin-bottom: 16px;
+}
+.back-btn:hover { color: #27425E; }
+
+/* ================================================================
+   대시보드 레이아웃
+   ================================================================ */
+#app {
+    display: flex;
+    width: 1280px; height: 800px;
+    background: #fff;
+    padding: 15px 20px; gap: 30px;
+    overflow: hidden;
+}
+#leftCol {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; min-width: 0;
+}
+#dateLabel {
+    font-size: 14px; font-weight: bold; color: #4A7DB5;
+    text-align: center; margin-bottom: 2px;
+}
+#titleLabel {
+    font-size: 27px; font-weight: 900; color: #22303E;
+    text-align: center; margin-bottom: 4px;
+}
+#chartWrap {
+    flex: 1; width: 100%; position: relative;
+    display: flex; align-items: center; justify-content: center;
+}
+#gearDiv {
+    pointer-events: none; will-change: transform;
+    transition: transform 0.9s cubic-bezier(0.45, 0.05, 0.22, 1);
+}
+#gearDiv path[id^="leaf-"] { pointer-events: all; cursor: pointer; }
+#gearDiv path[id^="leaf-"]:hover { opacity: 0.8; }
+#centerOverlay {
+    position: absolute; border-radius: 50%;
+    background-color: #fff; color: #2C3E50;
+    z-index: 10; overflow: hidden;
+}
+
+/* 초기 로딩 시 차트 깜빡임 방지 */
+#chartWrap { opacity: 0; transition: opacity 0.3s ease; }
+#chartWrap.ready { opacity: 1; }
+#fanArea {
+    transition: opacity 0.25s ease;
+    position: absolute; top: 9%; left: 50%; transform: translateX(-50%);
+    width: 56%; height: 40%;
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+}
+.fan-row  { position: relative; width: 100%; text-align: center; line-height: 0; margin-bottom: 3px; }
+.fan-cell {
+    display: inline-block; background: #F1F6FB; color: #3A4654;
+    font-size: 0.82em; font-weight: 700; line-height: 1.6; letter-spacing: 0.02em;
+    border-radius: 99px; border: 1px solid #D9E5F1;
+    box-shadow: 0 1px 3px rgba(30,50,80,0.10);
+}
+.fan-cell.total { font-weight: 900; color: #27425E; }
+.fan-label {
+    position: absolute; top: 50%; transform: translateY(-50%); color: #3A4654;
+    font-size: 0.68em; font-weight: 800; line-height: 1; white-space: nowrap;
+}
+.fan-note {
+    display: inline-block; background: #EAF2FA; color: #4A7DB5;
+    font-size: 0.5em; font-weight: 700; line-height: 1.5; padding: 2px 0;
+    border-radius: 99px;
+}
+#fanArea .placeholder {
+    font-size: 0.85em; font-weight: bold; line-height: 1.7; color: #4A7DB5;
+    margin-top: 38%; text-align: center;
+}
+#bottomTexts {
+    position: absolute; top: 50%; left: 50%; transform: translateX(-50%);
+    width: 78%; height: 47%; text-align: center;
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+}
+#bottomTexts .disclaimer { font-size: 0.72em; font-weight: 800; line-height: 1.55; color: #2C3A48; }
+#bottomTexts .sub-note   { font-size: 0.55em; font-weight: 600; line-height: 1.5; color: #4A5462; margin-top: 2%; }
+#bottomTexts .dot        { width: 7px; height: 7px; border-radius: 50%; background: #B9CBDD; margin: 4.5% 0; }
+#bottomTexts .slogan     { font-size: 0.9em; font-weight: 900; line-height: 1.55; color: #22303E; }
+#bottomTexts .url        { font-size: 0.58em; font-weight: 600; color: #54606E; margin-top: 3%; }
+
+/* ================================================================
+   우측 패널
+   ================================================================ */
+#rightCol {
+    flex: 1; display: flex; flex-direction: column;
+    gap: 14px; padding-top: 30px; min-width: 0;
+    overflow: hidden;
+}
+#btnGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; }
+.group-box { display: flex; flex-direction: column; gap: 8px; }
+.group-header {
+    font-size: 15px; font-weight: bold; color: #22303E;
+    border-bottom: 2px solid #27425E; padding-bottom: 5px;
+    text-align: center;
+}
+.btn-row { display: flex; gap: 6px; }
+.sub-btn {
+    flex: 1; min-height: 44px; border-radius: 8px; border: 1px solid #A9C4E2;
+    background: #A9C4E2; color: #fff; font-size: 12px; font-weight: bold;
+    cursor: pointer; transition: background 0.15s;
+    white-space: pre-line; text-align: center; padding: 4px;
+}
+.sub-btn:hover { background: #8FAFD4; }
+.sub-btn.active { background: #27425E; border-color: #27425E; }
+
+#barChartBox {
+    flex: 1; min-height: 110px;
+    background: #fff; border: 1px solid #D7E4F0; border-radius: 8px;
+    padding: 8px;
+}
+#barCanvas { width: 100%; height: 100%; display: block; }
+
+#infoBar {
+    font-size: 13px; color: #3A4654; background: #F1F6FB;
+    border: 1px solid #D7E4F0; padding: 10px 14px; border-radius: 8px;
+}
+#infoBar b { color: #4A7DB5; }
+
+#summaryTable {
+    width: 100%; border-collapse: collapse; font-size: 13px; color: #3A4654;
+    border: 1px solid #DCE4EC; border-radius: 8px; overflow: hidden;
+}
+#summaryTable td { padding: 8px; text-align: center; border: 1px solid #E8ECF1; }
+#summaryTable td.lc { background: #F3F6FA; }
+
+#ctaBtn {
+    display: block; width: 100%; padding: 14px 20px;
+    background: #27425E; color: #fff; font-size: 14px; font-weight: bold;
+    border: none; border-radius: 10px; cursor: pointer;
+    text-align: center; transition: background 0.15s;
+}
+#ctaBtn:hover { background: #1B3148; }
+#dataSource { font-size: 11px; color: #8899AA; text-align: right; padding: 2px 0; }
+
+/* ================================================================
+   계산기 스타일
+   ================================================================ */
+.calc-wrap {
+    max-width: 520px; margin: 0 auto; padding: 32px 20px 48px;
+}
+.calc-header { text-align: center; margin-bottom: 36px; }
+.calc-header .badge {
+    display: inline-block; font-size: 12px; font-weight: 700;
+    color: #3E6B99; background: #E8F0F8;
+    padding: 4px 12px; border-radius: 20px; margin-bottom: 14px;
+}
+.calc-header h1 { font-size: 26px; font-weight: 900; line-height: 1.35; color: #22303E; }
+.calc-header h1 span { color: #3E6B99; }
+.calc-header p { margin-top: 10px; font-size: 14px; color: #5A6B7D; line-height: 1.6; }
+
+.c-card {
+    background: #fff; border-radius: 16px; padding: 28px 24px;
+    box-shadow: 0 2px 12px rgba(39,66,94,0.06); margin-bottom: 16px;
+}
+.c-step-label { font-size: 12px; font-weight: 700; color: #8FAFD4; margin-bottom: 10px; }
+.c-usage-section { margin-bottom: 8px; }
+.c-usage-cat { font-size: 13px; font-weight: 700; color: #3E6B99; margin-bottom: 8px; padding-left: 2px; }
+.c-usage-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.c-usage-btn {
+    flex: 1 1 auto; min-width: calc(50% - 4px);
+    padding: 12px 8px; border: 2px solid #E2EAF2; border-radius: 10px;
+    background: #fff; font-size: 14px; font-weight: 600;
+    color: #4A5E73; cursor: pointer; transition: all 0.15s;
+    text-align: center; line-height: 1.3; font-family: inherit;
+}
+.c-usage-btn:hover { border-color: #8FAFD4; background: #F5F9FD; }
+.c-usage-btn.active { border-color: #27425E; background: #27425E; color: #fff; }
+.c-usage-btn .sub-info { display: block; font-size: 11px; font-weight: 500; margin-top: 2px; opacity: 0.7; }
+
+.c-area-wrap { position: relative; }
+.c-area-input {
+    width: 100%; padding: 16px 60px 16px 18px;
+    border: 2px solid #E2EAF2; border-radius: 12px;
+    font-size: 22px; font-weight: 700; color: #22303E;
+    outline: none; font-family: inherit; transition: border-color 0.15s;
+}
+.c-area-input:focus { border-color: #3E6B99; }
+.c-area-input::placeholder { color: #C0CBDA; font-weight: 500; }
+.c-area-unit { position: absolute; right: 18px; top: 50%; transform: translateY(-50%); font-size: 16px; font-weight: 700; color: #8FAFD4; }
+.c-area-helper { margin-top: 8px; font-size: 12px; color: #94A3B5; text-align: right; }
+
+.c-result-card {
+    background: linear-gradient(135deg, #27425E 0%, #3E6B99 100%);
+    border-radius: 16px; padding: 32px 24px; color: #fff; text-align: center;
+    box-shadow: 0 4px 20px rgba(39,66,94,0.18); margin-bottom: 16px; display: none;
+}
+.c-result-card.visible { display: block; }
+.c-result-label { font-size: 13px; font-weight: 600; color: #B8D4EE; margin-bottom: 6px; }
+.c-result-eyebrow { font-size: 12px; font-weight: 600; color: #8FAFD4; margin-bottom: 2px; }
+.c-result-main { font-size: 40px; font-weight: 900; letter-spacing: -0.03em; line-height: 1.2; margin-bottom: 2px; }
+.c-result-sub { font-size: 14px; font-weight: 500; color: #B8D4EE; margin-bottom: 6px; }
+.c-result-direct {
+    display: inline-block; font-size: 12px; font-weight: 600; color: #8FAFD4;
+    background: rgba(255,255,255,0.1); padding: 4px 14px; border-radius: 20px; margin-bottom: 24px;
+}
+.c-cost-bars { text-align: left; margin-bottom: 20px; }
+.c-cost-bar-row { display: flex; align-items: center; margin-bottom: 8px; }
+.c-cost-bar-label { width: 68px; font-size: 12px; font-weight: 600; color: #B8D4EE; flex-shrink: 0; }
+.c-cost-bar-track { flex: 1; height: 10px; background: rgba(255,255,255,0.15); border-radius: 5px; overflow: hidden; margin-right: 10px; }
+.c-cost-bar-fill { height: 100%; border-radius: 5px; transition: width 0.5s ease; }
+.c-cost-bar-fill.f건축 { background: #fff; }
+.c-cost-bar-fill.f기계 { background: #8FAFD4; }
+.c-cost-bar-fill.f전기 { background: #5B9BD5; }
+.c-cost-bar-fill.f토목 { background: #B8D4EE; }
+.c-cost-bar-val { width: 60px; font-size: 12px; font-weight: 700; color: #fff; text-align: right; flex-shrink: 0; }
+.c-total-band { display: flex; justify-content: center; gap: 32px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.2); }
+.c-total-item { text-align: center; }
+.c-total-item .t-label { font-size: 11px; font-weight: 600; color: #8FAFD4; margin-bottom: 2px; }
+.c-total-item .t-val { font-size: 18px; font-weight: 800; }
+
+.c-disclaimer { background: #fff; border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(39,66,94,0.06); }
+.c-disclaimer p { font-size: 12px; color: #7A8A9C; line-height: 1.7; }
+.c-disclaimer strong { color: #4A5E73; }
+
+.c-cta-card {
+    background: #fff; border-radius: 16px; padding: 28px 24px;
+    text-align: center; box-shadow: 0 2px 12px rgba(39,66,94,0.06);
+}
+.c-cta-card p { font-size: 14px; color: #5A6B7D; line-height: 1.6; margin-bottom: 18px; }
+.c-cta-card p strong { color: #22303E; }
+.c-cta-btn {
+    display: inline-block; padding: 16px 48px; background: #27425E;
+    color: #fff; font-size: 16px; font-weight: 800; border-radius: 12px;
+    text-decoration: none; transition: background 0.15s;
+}
+.c-cta-btn:hover { background: #1B3148; }
+.c-cta-footer { margin-top: 14px; font-size: 12px; color: #94A3B5; }
+
+.c-empty { text-align: center; padding: 40px 20px; color: #94A3B5; display: none; }
+.c-empty.visible { display: block; }
+.c-empty .icon { font-size: 48px; margin-bottom: 12px; opacity: 0.4; }
+.c-empty p { font-size: 14px; line-height: 1.6; }
+
+/* ================================================================
+   반응형
+   ================================================================ */
+@media (max-width: 900px) {
+    html, body { overflow: auto; }
+    #app { flex-direction: column; height: auto; min-height: 100%; padding: 12px; gap: 16px; }
+    #leftCol { max-height: 55vh; }
+    #rightCol { padding-top: 0; }
+}
+</style>
+</head>
+<body>
+
+<!-- ████████████████████████████████████████████████████████████
+     화면 1: 대시보드
+     ████████████████████████████████████████████████████████████ -->
+<div id="dashboardView">
+<div id="app">
+    <div id="leftCol">
+        <div id="dateLabel">2026년 07월 기준</div>
+        <div id="titleLabel">건축물 용도별 공사비</div>
+        <div id="chartWrap">
+            <div id="gearDiv"></div>
+            <div id="centerOverlay">
+                <div id="fanArea">
+                    <div class="placeholder">우측에서<br/>건축물 용도를<br/>선택해주세요</div>
+                </div>
+                <div id="bottomTexts">
+                    <div class="disclaimer">실제 현장 데이터를 기반으로 산정한<br/>투명한 공사비 정보입니다.</div>
+                    <div class="sub-note">인테리어·간접비 제외 / VAT 별도<br/>프로젝트 조건에 따라 달라질 수 있으며<br/>맞춤 견적은 하우빌드에서 확인하세요.</div>
+                    <div class="dot"></div>
+                    <div class="slogan">건축의 시작부터 끝까지<br/>하우빌드.</div>
+                    <div class="url">howbuild.com</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="rightCol">
+        <div id="btnGrid"></div>
+        <div id="barChartBox"><canvas id="barCanvas"></canvas></div>
+        <div id="infoBar">좌측 차트를 확인하려면 용도를 선택하세요</div>
+        <table id="summaryTable">
+            <tr><td class="lc">Total</td><td>-</td><td class="lc">건축</td><td>-</td></tr>
+            <tr><td class="lc">기계</td><td>-</td><td class="lc">전기/통신</td><td>-</td></tr>
+            <tr><td class="lc">토목/조경</td><td>-</td><td class="lc"></td><td>-</td></tr>
+        </table>
+        <button id="ctaBtn" onclick="openCalculator()">💰  총 예상 공사비 확인하러 가기  →</button>
+        <div id="dataSource"></div>
+    </div>
+</div>
+</div>
+
+<!-- ████████████████████████████████████████████████████████████
+     화면 2: 공사비 계산기
+     ████████████████████████████████████████████████████████████ -->
+<div id="calcView">
+<div class="calc-wrap">
+
+    <button class="back-btn" onclick="backToDashboard()">← 대시보드로 돌아가기</button>
+
+    <div class="calc-header">
+        <div class="badge">244개 현장 실적 데이터 기반</div>
+        <h1><span>내 건물</span> 공사비,<br>평당 얼마일까?</h1>
+        <p>건물 용도와 면적만 입력하면<br>예상 공사비를 바로 확인할 수 있습니다.</p>
+    </div>
+
+    <!-- 용도 선택 -->
+    <div class="c-card">
+        <div class="c-step-label">건물 용도를 선택하세요</div>
+        <div class="c-usage-section">
+            <div class="c-usage-cat">근린생활시설</div>
+            <div class="c-usage-grid">
+                <button class="c-usage-btn" data-ckey="근린생활시설(단독)|상가">순수 상가</button>
+            </div>
+        </div>
+        <div class="c-usage-section">
+            <div class="c-usage-cat">상가주택 (복합)</div>
+            <div class="c-usage-grid">
+                <button class="c-usage-btn" data-ckey="상가주택(복합)|근생+다가구">근생+다가구</button>
+                <button class="c-usage-btn" data-ckey="상가주택(복합)|근생+단독">근생+단독</button>
+            </div>
+        </div>
+        <div class="c-usage-section">
+            <div class="c-usage-cat">공동주택</div>
+            <div class="c-usage-grid">
+                <button class="c-usage-btn" data-ckey="공동주택|다세대주택">다세대주택</button>
+                <button class="c-usage-btn" data-ckey="공동주택|도시형생활주택">도시형생활주택</button>
+                <button class="c-usage-btn" data-ckey="공동주택|오피스텔(준주택)">오피스텔<span class="sub-info">(준주택)</span></button>
+            </div>
+        </div>
+        <div class="c-usage-section">
+            <div class="c-usage-cat">단독주택계</div>
+            <div class="c-usage-grid">
+                <button class="c-usage-btn" data-ckey="단독주택계|단독주택">단독주택</button>
+                <button class="c-usage-btn" data-ckey="단독주택계|다가구주택">다가구주택</button>
+            </div>
+        </div>
+        <div class="c-usage-section">
+            <div class="c-usage-cat">업무 · 숙박</div>
+            <div class="c-usage-grid">
+                <button class="c-usage-btn" data-ckey="업무시설|일반업무">일반업무</button>
+                <button class="c-usage-btn" data-ckey="숙박시설|일반숙박">일반숙박</button>
+            </div>
+        </div>
+        <div class="c-usage-section">
+            <div class="c-usage-cat">산업 · 기타</div>
+            <div class="c-usage-grid">
+                <button class="c-usage-btn" data-ckey="산업시설|공장">공장</button>
+                <button class="c-usage-btn" data-ckey="산업시설|창고">창고</button>
+                <button class="c-usage-btn" data-ckey="기타 특수시설|종교/노유자/교육/의료">종교·교육·의료</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 면적 입력 -->
+    <div class="c-card">
+        <div class="c-step-label">예상 연면적을 입력하세요</div>
+        <div class="c-area-wrap">
+            <input type="text" class="c-area-input" id="cAreaInput" placeholder="예: 150" inputmode="numeric">
+            <span class="c-area-unit">평</span>
+        </div>
+        <div class="c-area-helper" id="cAreaHelper"></div>
+    </div>
+
+    <!-- 빈 상태 -->
+    <div class="c-empty visible" id="cEmpty">
+        <div class="icon">🏗</div>
+        <p>용도를 선택하고 면적을 입력하면<br>예상 공사비가 여기에 표시됩니다.</p>
+    </div>
+
+    <!-- 결과 -->
+    <div class="c-result-card" id="cResult">
+        <div class="c-result-label" id="cResultUsage">—</div>
+        <div class="c-result-eyebrow">예상 총 공사비</div>
+        <div class="c-result-main" id="cResultMain">—</div>
+        <div class="c-result-sub" id="cResultSub">—</div>
+        <div class="c-result-direct" id="cResultDirect">—</div>
+        <div class="c-cost-bars">
+            <div class="c-cost-bar-row">
+                <span class="c-cost-bar-label">건축</span>
+                <div class="c-cost-bar-track"><div class="c-cost-bar-fill f건축" id="cBar건축"></div></div>
+                <span class="c-cost-bar-val" id="cVal건축">-</span>
+            </div>
+            <div class="c-cost-bar-row">
+                <span class="c-cost-bar-label">기계</span>
+                <div class="c-cost-bar-track"><div class="c-cost-bar-fill f기계" id="cBar기계"></div></div>
+                <span class="c-cost-bar-val" id="cVal기계">-</span>
+            </div>
+            <div class="c-cost-bar-row">
+                <span class="c-cost-bar-label">전기/통신</span>
+                <div class="c-cost-bar-track"><div class="c-cost-bar-fill f전기" id="cBar전기"></div></div>
+                <span class="c-cost-bar-val" id="cVal전기">-</span>
+            </div>
+            <div class="c-cost-bar-row">
+                <span class="c-cost-bar-label">토목/조경</span>
+                <div class="c-cost-bar-track"><div class="c-cost-bar-fill f토목" id="cBar토목"></div></div>
+                <span class="c-cost-bar-val" id="cVal토목">-</span>
+            </div>
+        </div>
+        <div class="c-total-band">
+            <div class="c-total-item">
+                <div class="t-label">평당 직접공사비</div>
+                <div class="t-val" id="cTotalPP">-</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 면책 -->
+    <div class="c-disclaimer" id="cDisclaimer" style="display:none;">
+        <p><strong>예상 총 공사비</strong>는 4공종(건축·기계·전기·토목) 직접공사비에 간접비·설계·감리·VAT를 포함하여 약 1.3배로 추정한 수치입니다. 인테리어 및 토지비는 별도이며, 실제 공사비는 대지 조건, 설계, 마감 수준에 따라 달라질 수 있습니다.</p>
+    </div>
+
+    <!-- CTA → 하우빌드 홈페이지 -->
+    <div class="c-cta-card" id="cCtaCard" style="display:none;">
+        <p><strong>평균 단가로 감을 잡으셨다면,</strong><br>내 부지와 설계 조건에 맞는<br>정확한 견적을 받아보세요.</p>
+        <a href="https://dev-www.howbuild.com/application" target="_blank" class="c-cta-btn">견적 상담 신청</a>
+        <div class="c-cta-footer">건축의 시작부터 끝까지, 하우빌드</div>
+    </div>
+</div>
+</div>
+
+<script>
+// ================================================================
+// 공통 데이터
+// ================================================================
+var GROUPS = [
+    ["근린생활시설(단독)", ["상가"]],
+    ["상가주택(복합)",     ["근생+다가구", "근생+단독"]],
+    ["공동주택",           ["다세대주택", "도시형생활주택", "오피스텔(준주택)"]],
+    ["단독주택계",         ["단독주택", "다가구주택"]],
+    ["업무시설",           ["일반업무"]],
+    ["숙박시설",           ["일반숙박"]],
+    ["산업시설",           ["공장", "창고"]],
+    ["기타 특수시설",      ["종교/노유자/교육/의료"]]
+];
+var ALL_LEAVES = [];
+GROUPS.forEach(function(g) { g[1].forEach(function(s){ ALL_LEAVES.push([g[0],s]); }); });
+var LEAF_COUNT = ALL_LEAVES.length;
+var LEAF_ROTATIONS = [];
+for (var i = 0; i < LEAF_COUNT; i++) LEAF_ROTATIONS.push(((-(i+0.5)/LEAF_COUNT*360)%360+360)%360);
+var BASE_ROT = LEAF_ROTATIONS[0];
+var COLOR_CAT="#8FAFD4", COLOR_LEAF="#3E6B99", COLOR_HIGHLIGHT="#FFFFFF", COLOR_DARK="#27425E";
+
+var FALLBACK = {
+    "근린생활시설(단독)|상가":{"total":"6,340,000","건축":"4,860,000","기계":"490,000","전기통신":"400,000","소방":"-","토목조경":"600,000","기준":"인테리어·간접비 제외","단위":"원/평 (VAT 별도)","_raw_건축":4858063,"_raw_기계":491719,"_raw_전기":398676,"_raw_토목":596319},
+    "상가주택(복합)|근생+다가구":{"total":"7,300,000","건축":"6,190,000","기계":"560,000","전기통신":"460,000","소방":"-","토목조경":"90,000","기준":"인테리어·간접비 제외","단위":"원/평 (VAT 별도)","_raw_건축":6187345,"_raw_기계":564142,"_raw_전기":455634,"_raw_토목":91007},
+    "상가주택(복합)|근생+단독":{"total":"6,290,000","건축":"5,270,000","기계":"440,000","전기통신":"370,000","소방":"-","토목조경":"210,000","기준":"인테리어·간접비 제외","단위":"원/평 (VAT 별도)","_raw_건축":5274377,"_raw_기계":437449,"_raw_전기":368747,"_raw_토목":207362},
+    "공동주택|다세대주택":{"total":"8,600,000","건축":"6,340,000","기계":"740,000","전기통신":"560,000","소방":"-","토목조경":"950,000","기준":"인테리어·간접비 제외","단위":"원/평 (VAT 별도)","_raw_건축":6344976,"_raw_기계":741129,"_raw_전기":563874,"_raw_토목":947881},
+    "공동주택|도시형생활주택":{"total":"9,050,000","건축":"7,020,000","기계":"1,110,000","전기통신":"740,000","소방":"-","토목조경":"170,000","기준":"인테리어·간접비 제외","단위":"원/평 (VAT 별도)","_raw_건축":7017918,"_raw_기계":1112662,"_raw_전기":743123,"_raw_토목":171733},
+    "공동주택|오피스텔(준주택)":{"total":"6,670,000","건축":"4,520,000","기계":"980,000","전기통신":"480,000","소방":"-","토목조경":"680,000","기준":"인테리어·간접비 제외","단위":"원/평 (VAT 별도)","_raw_건축":4519684,"_raw_기계":984185,"_raw_전기":477761,"_raw_토목":683413},
+    "단독주택계|단독주택":{"total":"11,000,000","건축":"9,300,000","기계":"630,000","전기통신":"450,000","소방":"-","토목조경":"610,000","기준":"인테리어·간접비 제외","단위":"원/평 (VAT 별도)","_raw_건축":9304950,"_raw_기계":631404,"_raw_전기":450624,"_raw_토목":612035},
+    "단독주택계|다가구주택":{"total":"7,640,000","건축":"6,740,000","기계":"490,000","전기통신":"410,000","소방":"-","토목조경":"0","기준":"인테리어·간접비 제외","단위":"원/평 (VAT 별도)","_raw_건축":6736443,"_raw_기계":494717,"_raw_전기":410194,"_raw_토목":0},
+    "업무시설|일반업무":{"total":"7,080,000","건축":"4,730,000","기계":"800,000","전기통신":"480,000","소방":"-","토목조경":"1,070,000","기준":"인테리어·간접비 제외","단위":"원/평 (VAT 별도)","_raw_건축":4733822,"_raw_기계":795548,"_raw_전기":478873,"_raw_토목":1069958},
+    "숙박시설|일반숙박":{"total":"9,490,000","건축":"7,510,000","기계":"990,000","전기통신":"700,000","소방":"-","토목조경":"290,000","기준":"인테리어·간접비 제외","단위":"원/평 (VAT 별도)","_raw_건축":7509887,"_raw_기계":991697,"_raw_전기":698115,"_raw_토목":294999},
+    "산업시설|공장":{"total":"3,400,000","건축":"3,030,000","기계":"100,000","전기통신":"280,000","소방":"-","토목조경":"0","기준":"인테리어·간접비 제외","단위":"원/평 (VAT 별도)","_raw_건축":3026074,"_raw_기계":95267,"_raw_전기":280192,"_raw_토목":0},
+    "산업시설|창고":{"total":"3,390,000","건축":"2,840,000","기계":"130,000","전기통신":"310,000","소방":"-","토목조경":"110,000","기준":"인테리어·간접비 제외","단위":"원/평 (VAT 별도)","_raw_건축":2844301,"_raw_기계":133106,"_raw_전기":308659,"_raw_토목":106579},
+    "기타 특수시설|종교/노유자/교육/의료":{"total":"4,460,000","건축":"3,690,000","기계":"290,000","전기통신":"320,000","소방":"-","토목조경":"150,000","기준":"인테리어·간접비 제외","단위":"원/평 (VAT 별도)","_raw_건축":3689773,"_raw_기계":290653,"_raw_전기":323150,"_raw_토목":151953}
+};
+
+// 계산기용 raw 데이터
+var CALC_DATA = {
+    "근린생활시설(단독)|상가":{건축:4858063,기계:491719,전기:398676,토목:596319},
+    "상가주택(복합)|근생+다가구":{건축:6187345,기계:564142,전기:455634,토목:91007},
+    "상가주택(복합)|근생+단독":{건축:5274377,기계:437449,전기:368747,토목:207362},
+    "공동주택|다세대주택":{건축:6344976,기계:741129,전기:563874,토목:947881},
+    "공동주택|도시형생활주택":{건축:7017918,기계:1112662,전기:743123,토목:171733},
+    "공동주택|오피스텔(준주택)":{건축:4519684,기계:984185,전기:477761,토목:683413},
+    "단독주택계|단독주택":{건축:9304950,기계:631404,전기:450624,토목:612035},
+    "단독주택계|다가구주택":{건축:6736443,기계:494717,전기:410194,토목:0},
+    "업무시설|일반업무":{건축:4733822,기계:795548,전기:478873,토목:1069958},
+    "숙박시설|일반숙박":{건축:7509887,기계:991697,전기:698115,토목:294999},
+    "산업시설|공장":{건축:3026074,기계:95267,전기:280192,토목:0},
+    "산업시설|창고":{건축:2844301,기계:133106,전기:308659,토목:106579},
+    "기타 특수시설|종교/노유자/교육/의료":{건축:3689773,기계:290653,전기:323150,토목:151953}
+};
+var CALC_GMAX = Math.max.apply(null, Object.keys(CALC_DATA).map(function(k){return CALC_DATA[k].건축;}));
+
+var SHEET_ID = "1Tido2rIjnNU35MVeOOjbcGwHsfwXvJ4x";
+var SHEET_NAME = "용도별_평균(전체)";
+var USAGE_MAP = {
+    "순수상가":["근린생활시설(단독)","상가"],"근생+다가구":["상가주택(복합)","근생+다가구"],
+    "근생+단독":["상가주택(복합)","근생+단독"],"다세대주택":["공동주택","다세대주택"],
+    "도시형생활주택":["공동주택","도시형생활주택"],"오피스텔(준주택)":["공동주택","오피스텔(준주택)"],
+    "단독주택":["단독주택계","단독주택"],"다가구주택":["단독주택계","다가구주택"],
+    "일반업무":["업무시설","일반업무"],"일반숙박":["숙박시설","일반숙박"],
+    "공장":["산업시설","공장"],"창고":["산업시설","창고"],
+    "종교/노유자/교육/의료":["기타 특수시설","종교/노유자/교육/의료"]
+};
+
+var ITEM_DATA = {}, LEAF_DATA = [];
+function keyOf(c,s){return c+"|"+s;}
+function initDataFromFlat(flat){
+    ITEM_DATA={};
+    ALL_LEAVES.forEach(function(p){var k=keyOf(p[0],p[1]);if(flat[k])ITEM_DATA[k]=flat[k];});
+    LEAF_DATA=ALL_LEAVES.map(function(p,idx){
+        var d=ITEM_DATA[keyOf(p[0],p[1])]||{};
+        return {leafIndex:idx,total:d.total||"-","건축":d["건축"]||"-","기계":d["기계"]||"-",
+            "전기통신":d["전기통신"]||"-","토목조경":d["토목조경"]||"-","기준":d["기준"]||"-","단위":d["단위"]||"-",
+            _raw_건축:d._raw_건축||0,_raw_기계:d._raw_기계||0,_raw_전기:d._raw_전기||0,_raw_토목:d._raw_토목||0};
+    });
+}
+function fmt(v){v=Math.round(v/10000)*10000;return v.toLocaleString("ko-KR");}
+function numP(s){if(!s)return 0;var n=parseFloat(String(s).replace(/,/g,"").trim());return isNaN(n)?0:n;}
+
+// ================================================================
+// 구글 시트 fetch
+// ================================================================
+function fetchGoogleSheet(){
+    var url="https://docs.google.com/spreadsheets/d/"+SHEET_ID+"/gviz/tq?tqx=out:csv&sheet="+encodeURIComponent(SHEET_NAME);
+    fetch(url).then(function(r){return r.text();}).then(function(csv){
+        var parsed=parseCSV(csv);
+        if(parsed&&Object.keys(parsed).length>0){
+            initDataFromFlat(parsed);
+            document.getElementById("dataSource").textContent="📊 구글 시트 실시간 데이터";
+            if(currentSelection) selectItem(currentSelection[0],currentSelection[1]);
+        }
+    }).catch(function(e){console.warn("구글 시트 로드 실패:",e);});
+}
+function parseCSV(csv){
+    var lines=[],cur="",inQ=false;
+    for(var i=0;i<csv.length;i++){var c=csv[i];if(c==='"'){inQ=!inQ;continue;}if(c==='\n'&&!inQ){lines.push(cur);cur="";continue;}if(c==='\r')continue;cur+=c;}
+    if(cur)lines.push(cur);if(lines.length<2)return null;
+    var hdr=spCSV(lines[0]),c표=-1,c건=-1,c기=-1,c전=-1,c토=-1;
+    hdr.forEach(function(h,j){
+        if(h.indexOf("표준용도")>=0)c표=j;
+        if(h.indexOf("건축")>=0&&h.indexOf("평단가")>=0)c건=j;
+        if(h.indexOf("기계")>=0&&h.indexOf("평단가")>=0)c기=j;
+        if(h.indexOf("전기")>=0&&h.indexOf("평단가")>=0)c전=j;
+        if(h.indexOf("토목")>=0&&h.indexOf("평단가")>=0)c토=j;
+    });
+    if(c표<0)return null;
+    var res={};
+    for(var r=1;r<lines.length;r++){
+        var cols=spCSV(lines[r]),u=(cols[c표]||"").trim();
+        if(!u||u.indexOf("소계")>=0||u.indexOf("합계")>=0)continue;
+        if(!USAGE_MAP[u])continue;
+        var p=USAGE_MAP[u],건=numP(cols[c건]),기=numP(cols[c기]),전=numP(cols[c전]),토=numP(cols[c토]),합=건+기+전+토;
+        res[p[0]+"|"+p[1]]={total:fmt(합),"건축":fmt(건),"기계":fmt(기),"전기통신":fmt(전),"소방":"-","토목조경":fmt(토),
+            "기준":"인테리어·간접비 제외","단위":"원/평 (VAT 별도)",_raw_건축:건,_raw_기계:기,_raw_전기:전,_raw_토목:토};
+        // 계산기 데이터도 업데이트
+        CALC_DATA[p[0]+"|"+p[1]]={건축:건,기계:기,전기:전,토목:토};
+    }
+    CALC_GMAX=Math.max.apply(null,Object.keys(CALC_DATA).map(function(k){return CALC_DATA[k].건축;}));
+    return res;
+}
+function spCSV(l){var r=[],c="",q=false;for(var i=0;i<l.length;i++){var ch=l[i];if(ch==='"'){q=!q;continue;}if(ch===','&&!q){r.push(c);c="";continue;}c+=ch;}r.push(c);return r;}
+
+// ================================================================
+// SVG 기어 차트
+// ================================================================
+function buildGearSVG(){
+    var CX=500,CY=500,LR0=332,LR1=408,CR0=412,RR=474,TR=500;
+    var NT=LEAF_COUNT*3,PI=360/NT,HWR=0.30*PI,HWT=0.20*PI;
+    function pt(r,d){var rad=d*Math.PI/180;return[CX+r*Math.sin(rad),CY-r*Math.cos(rad)];}
+    function ac(r,a0,a1,sw){var p=pt(r,a1);return"A "+r.toFixed(2)+" "+r.toFixed(2)+" 0 "+(Math.abs(a1-a0)>180?1:0)+" "+sw+" "+p[0].toFixed(2)+" "+p[1].toFixed(2)+" ";}
+    function ln(r,d){var p=pt(r,d);return"L "+p[0].toFixed(2)+" "+p[1].toFixed(2)+" ";}
+    function annP(r0,r1,a0,a1){var p=pt(r1,a0);return"M "+p[0].toFixed(2)+" "+p[1].toFixed(2)+" "+ac(r1,a0,a1,1)+ln(r0,a1)+ac(r0,a1,a0,0)+"Z";}
+    function gP(a0,a1){var p=pt(RR,a0),d="M "+p[0].toFixed(2)+" "+p[1].toFixed(2)+" ",pos=a0;
+        for(var k=Math.round(a0/PI);k<Math.round(a1/PI);k++){var c=(k+0.5)*PI;d+=ac(RR,pos,c-HWR,1)+ln(TR,c-HWT)+ac(TR,c-HWT,c+HWT,1)+ln(RR,c+HWR);pos=c+HWR;}
+        d+=ac(RR,pos,a1,1)+ln(CR0,a1)+ac(CR0,a1,a0,0);return d+"Z";}
+    function wL(t){if(t==="종교/노유자/교육/의료")return["종교/노유자","교육/의료"];if(t.indexOf("(")>=0&&t.length>6){var i=t.indexOf("(");if(i>0)return[t.substring(0,i),t.substring(i)];}return[t];}
+    function lSVG(t,r,d,sz,id){var ls=wL(t),p=pt(r,d),dy0=-(ls.length-1)*0.55,ts="";
+        for(var i=0;i<ls.length;i++){ts+='<tspan x="'+p[0].toFixed(2)+'" dy="'+(i===0?dy0:1.1).toFixed(2)+'em">'+ls[i]+'</tspan>';}
+        return'<text'+(id?' id="'+id+'"':'')+' x="'+p[0].toFixed(2)+'" y="'+p[1].toFixed(2)+'" fill="white" font-size="'+sz+'" text-anchor="middle" dominant-baseline="middle" transform="rotate('+d.toFixed(2)+' '+p[0].toFixed(2)+' '+p[1].toFixed(2)+')">'+ts+'</text>';}
+    var la=360/LEAF_COUNT,ps=[],cum=0;
+    GROUPS.forEach(function(g){var a0=cum*la,a1=(cum+g[1].length)*la;ps.push('<path d="'+gP(a0,a1)+'" fill="'+COLOR_CAT+'" stroke="white" stroke-width="3"/>');ps.push(lSVG(g[0],(CR0+RR)/2,(a0+a1)/2,25));cum+=g[1].length;});
+    ALL_LEAVES.forEach(function(p,i){var a0=i*la,a1=(i+1)*la;
+        ps.push('<path id="leaf-'+i+'" d="'+annP(LR0,LR1,a0,a1)+'" fill="'+COLOR_LEAF+'" stroke="white" stroke-width="2" style="pointer-events:all;cursor:pointer;" onclick="onLeafClick('+i+')"/>');
+        ps.push(lSVG(p[1],(LR0+LR1)/2,(a0+a1)/2,22,'leaftext-'+i));});
+    return'<svg viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" font-family="\'Noto Sans KR\',\'Apple SD Gothic Neo\',\'Malgun Gothic\',sans-serif" font-weight="bold"><g transform="rotate('+BASE_ROT.toFixed(4)+' 500 500)">'+ps.join('')+'</g></svg>';
+}
+
+// ================================================================
+// 차트 크기 / 회전
+// ================================================================
+function resizeChart(){
+    var w=document.getElementById('chartWrap'),side=Math.min(w.clientWidth,w.clientHeight),cs=Math.round(side*0.96),cen=Math.round(cs*0.66);
+    var g=document.getElementById('gearDiv');g.style.width=cs+'px';g.style.height=cs+'px';
+    var o=document.getElementById('centerOverlay');o.style.width=cen+'px';o.style.height=cen+'px';
+    o.style.top='50%';o.style.left='50%';o.style.transform='translate(-50%,-50%)';
+    o.style.fontSize=Math.max(11,Math.round(cen*0.036))+'px';
+}
+var cssRot=0;
+function normR(x){return((x%360)+360)%360;}
+function rotateToLeaf(idx){var cv=normR(BASE_ROT+cssRot),tg=LEAF_ROTATIONS[idx],d=((tg-cv)%360+540)%360-180;if(Math.abs(d)<0.01)return;cssRot+=d;document.getElementById('gearDiv').style.transform='rotate('+cssRot+'deg)';}
+
+function buildFan(p){
+    var rows=[["Total",p.total,true],["건축",p["건축"],false],["기계",p["기계"],false],["전기/통신",p["전기통신"],false],["토목/조경",p["토목조경"],false]],W=80,h='';
+    for(var i=0;i<rows.length;i++){h+='<div class="fan-row"><span class="fan-label" style="right:'+(50+W/2+1)+'%;">'+rows[i][0]+'</span><span class="fan-cell'+(rows[i][2]?' total':'')+'" style="width:'+W+'%;">'+rows[i][1]+'</span></div>';}
+    h+='<div class="fan-row"><span class="fan-note" style="width:58%;">'+p["기준"]+'</span></div>';
+    document.getElementById('fanArea').innerHTML=h;
+}
+
+function onLeafClick(idx){
+    var d=LEAF_DATA[idx];if(!d||!d.total||d.total==="-")return;
+    for(var i=0;i<LEAF_COUNT;i++){document.getElementById('leaf-'+i).setAttribute('fill',i===idx?COLOR_HIGHLIGHT:COLOR_LEAF);document.getElementById('leaftext-'+i).setAttribute('fill',i===idx?COLOR_DARK:'white');}
+    rotateToLeaf(idx);
+    var f=document.getElementById('fanArea');f.style.opacity='0';
+    setTimeout(function(){buildFan(d);f.style.opacity='1';},120);
+    selectItemUI(ALL_LEAVES[idx][0],ALL_LEAVES[idx][1],d);
+}
+
+// ================================================================
+// 우측 패널
+// ================================================================
+function buildButtons(){
+    var grid=document.getElementById('btnGrid'),cp=[["근린생활시설(단독)","상가주택(복합)"],["공동주택","단독주택계"],["업무시설","숙박시설"],["산업시설","기타 특수시설"]],gd={};
+    GROUPS.forEach(function(g){gd[g[0]]=g[1];});
+    cp.forEach(function(pair){pair.forEach(function(cat){
+        var box=document.createElement('div');box.className='group-box';
+        var hdr=document.createElement('div');hdr.className='group-header';hdr.textContent=cat;box.appendChild(hdr);
+        var row=document.createElement('div');row.className='btn-row';
+        gd[cat].forEach(function(sub){
+            var b=document.createElement('button');b.className='sub-btn';
+            b.textContent=sub==="종교/노유자/교육/의료"?"종교/노유자\n교육/의료":(sub.indexOf("(")>=0&&sub.length>6?sub.substring(0,sub.indexOf("("))+"\n"+sub.substring(sub.indexOf("(")):sub);
+            b.dataset.cat=cat;b.dataset.sub=sub;
+            b.addEventListener('click',function(){selectItem(cat,sub);});
+            row.appendChild(b);
+        });
+        box.appendChild(row);grid.appendChild(box);
+    });});
+}
+
+var currentSelection=null;
+function selectItem(c,s){
+    currentSelection=[c,s];var k=keyOf(c,s),d=ITEM_DATA[k];if(!d)return;
+    var idx=ALL_LEAVES.findIndex(function(p){return p[0]===c&&p[1]===s;});
+    for(var i=0;i<LEAF_COUNT;i++){document.getElementById('leaf-'+i).setAttribute('fill',i===idx?COLOR_HIGHLIGHT:COLOR_LEAF);document.getElementById('leaftext-'+i).setAttribute('fill',i===idx?COLOR_DARK:'white');}
+    rotateToLeaf(idx);
+    var f=document.getElementById('fanArea');f.style.opacity='0';
+    setTimeout(function(){buildFan(LEAF_DATA[idx]);f.style.opacity='1';},120);
+    selectItemUI(c,s,LEAF_DATA[idx]);
+}
+function selectItemUI(c,s,d){
+    currentSelection=[c,s];
+    document.querySelectorAll('.sub-btn').forEach(function(b){b.classList.toggle('active',b.dataset.cat===c&&b.dataset.sub===s);});
+    document.getElementById('infoBar').innerHTML='<b>기준</b> : '+d["기준"]+' &nbsp;&nbsp;&nbsp; <b>단위</b> : '+d["단위"];
+    fillTable(d);animateBarChart(d._raw_건축||0,d._raw_기계||0,d._raw_전기||0,d._raw_토목||0);
+}
+function fillTable(d){
+    document.getElementById('summaryTable').innerHTML=
+        '<tr><td class="lc">Total</td><td>'+(d.total||"-")+'</td><td class="lc">건축</td><td>'+(d["건축"]||"-")+'</td></tr>'+
+        '<tr><td class="lc">기계</td><td>'+(d["기계"]||"-")+'</td><td class="lc">전기/통신</td><td>'+(d["전기통신"]||"-")+'</td></tr>'+
+        '<tr><td class="lc">토목/조경</td><td>'+(d["토목조경"]||"-")+'</td><td class="lc"></td><td></td></tr>';
+}
+
+// ================================================================
+// 막대 그래프 (Canvas)
+// ================================================================
+var bT=[0,0,0,0],bC=[0,0,0,0],bF=[0,0,0,0],bS=0,bId=null,BS=24;
+var BI=[{l:"건축",c:"#3E6B99"},{l:"기계",c:"#5B9BD5"},{l:"전기/통신",c:"#8FAFD4"},{l:"토목/조경",c:"#B8D4EE"}];
+function gMax(){var m=1;Object.keys(ITEM_DATA).forEach(function(k){var v=ITEM_DATA[k]._raw_건축||0;if(v>m)m=v;});return m;}
+function animateBarChart(a,b,c,d){if(bId)cancelAnimationFrame(bId);bF=bC.slice();bT=[a,b,c,d];bS=0;bTick();}
+function bTick(){bS++;var t=bS/BS;t=1-Math.pow(1-t,3);t=Math.min(t,1);for(var i=0;i<4;i++)bC[i]=bF[i]+(bT[i]-bF[i])*t;drawBars();if(bS<BS)bId=requestAnimationFrame(bTick);else{bC=bT.slice();drawBars();bId=null;}}
+function drawBars(){
+    var cv=document.getElementById('barCanvas'),ctx=cv.getContext('2d'),dp=window.devicePixelRatio||1,W=cv.clientWidth,H=cv.clientHeight;
+    cv.width=W*dp;cv.height=H*dp;ctx.scale(dp,dp);
+    var n=4,pL=76,pR=96,pV=10,rH=(H-pV*2)/n,barH=Math.max(6,Math.round(rH*0.36)),bA=W-pL-pR,gm=gMax()||1;
+    var ff="9px 'Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif";
+    for(var i=0;i<n;i++){
+        var cy=pV+rH*i+rH/2,bw=Math.max(0,Math.round(bA*bC[i]/gm)),bx=pL,by=cy-barH/2;
+        ctx.fillStyle="#EBF1F8";rr(ctx,bx,by,bA,barH,barH/2);
+        if(bw>2){var gr=ctx.createLinearGradient(bx,by,bx+bw,by);gr.addColorStop(0,lc(BI[i].c,18));gr.addColorStop(1,BI[i].c);ctx.fillStyle=gr;rr(ctx,bx,by,bw,barH,barH/2);}
+        ctx.fillStyle="#52637A";ctx.font=ff;ctx.textAlign="right";ctx.textBaseline="middle";ctx.fillText(BI[i].l,pL-8,cy);
+        var tv=bT[i],vs=tv>=10000?Math.round(tv/10000).toLocaleString("ko-KR")+"만원":(tv===0?"-":Math.round(tv).toLocaleString("ko-KR")+"원");
+        ctx.fillStyle="#27425E";ctx.font="bold "+ff;ctx.textAlign="left";ctx.fillText(vs,bx+bA+6,cy);
+    }
+}
+function rr(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();ctx.fill();}
+function lc(hex,p){var n=parseInt(hex.replace('#',''),16),r=Math.min(255,((n>>16)&0xFF)+Math.round(2.55*p)),g=Math.min(255,((n>>8)&0xFF)+Math.round(2.55*p)),b=Math.min(255,(n&0xFF)+Math.round(2.55*p));return'#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);}
+
+// ================================================================
+// 화면 전환: 대시보드 ↔ 계산기
+// ================================================================
+function openCalculator(){
+    // 대시보드 숨기기
+    document.getElementById('dashboardView').style.display='none';
+    // 계산기 표시
+    var cv=document.getElementById('calcView');
+    cv.style.display='block';
+    // 트리거 reflow for transition
+    cv.offsetHeight;
+    cv.classList.add('visible');
+    window.scrollTo(0,0);
+
+    // 대시보드에서 선택된 용도 → 계산기에 자동 반영
+    if(currentSelection){
+        var k=keyOf(currentSelection[0],currentSelection[1]);
+        var btn=document.querySelector('[data-ckey="'+k+'"]');
+        if(btn){
+            document.querySelectorAll('.c-usage-btn').forEach(function(b){b.classList.remove('active');});
+            btn.classList.add('active');
+            calcSelectedKey=k;
+            setTimeout(function(){btn.scrollIntoView({behavior:'smooth',block:'center'});},200);
+        }
+    }
+}
+
+function backToDashboard(){
+    document.getElementById('calcView').classList.remove('visible');
+    setTimeout(function(){
+        document.getElementById('calcView').style.display='none';
+        document.getElementById('dashboardView').style.display='block';
+        resizeChart(); drawBars();
+    }, 350);
+}
+
+// ================================================================
+// 계산기 로직
+// ================================================================
+var calcSelectedKey = null;
+
+document.addEventListener('click', function(e) {
+    if (!e.target.classList.contains('c-usage-btn')) return;
+    document.querySelectorAll('.c-usage-btn').forEach(function(b){b.classList.remove('active');});
+    e.target.classList.add('active');
+    calcSelectedKey = e.target.dataset.ckey;
+    calcCalc();
+});
+
+function calcCalc(){
+    var inp=document.getElementById('cAreaInput');
+    var area=parseInt(inp.value)||0;
+    var empty=document.getElementById('cEmpty'),res=document.getElementById('cResult'),
+        disc=document.getElementById('cDisclaimer'),cta=document.getElementById('cCtaCard');
+    if(!calcSelectedKey||area<=0){
+        empty.classList.add('visible');res.classList.remove('visible');
+        disc.style.display='none';cta.style.display='none';return;
+    }
+    var d=CALC_DATA[calcSelectedKey];if(!d)return;
+    var 만원=function(v){return Math.round(v/10000)*10000;};
+    var total=만원(d.건축+d.기계+d.전기+d.토목);
+    var totalCost=total*area, estTotal=totalCost*1.3;
+    var parts=calcSelectedKey.split('|');
+    empty.classList.remove('visible');res.classList.add('visible');
+    disc.style.display='block';cta.style.display='block';
+
+    document.getElementById('cResultUsage').textContent=parts[1]+' · '+area+'평 기준';
+    var 억=function(v){var a=v/100000000;return a>=1?'약 '+a.toFixed(1)+'억원':'약 '+(v/10000).toLocaleString()+'만원';};
+    document.getElementById('cResultMain').textContent=억(estTotal);
+    document.getElementById('cResultSub').textContent='간접비·설계·감리·VAT 포함 추정';
+    var 억2=function(v){var a=v/100000000;return a>=1?a.toFixed(1)+'억원':(v/10000).toLocaleString()+'만원';};
+    document.getElementById('cResultDirect').textContent='4공종 직접공사비 '+억2(totalCost);
+
+    var items=[{k:'건축',v:d.건축},{k:'기계',v:d.기계},{k:'전기',v:d.전기},{k:'토목',v:d.토목}];
+    items.forEach(function(it){
+        var pct=Math.max(0,(it.v/CALC_GMAX)*100);
+        document.getElementById('cBar'+it.k).style.width=pct+'%';
+        document.getElementById('cVal'+it.k).textContent=Math.round(it.v/10000)+'만원';
+    });
+    document.getElementById('cTotalPP').textContent=Math.round(total/10000)+'만원';
+}
+
+// 면적 입력
+document.getElementById('cAreaInput').addEventListener('input',function(){
+    this.value=this.value.replace(/[^0-9]/g,'');
+    var v=parseInt(this.value);
+    document.getElementById('cAreaHelper').textContent=v>0?'≈ '+(v*3.3058).toFixed(0)+'㎡':'';
+    calcCalc();
+});
+
+// ================================================================
+// 초기화
+// ================================================================
+function init(){
+    initDataFromFlat(FALLBACK);
+    document.getElementById("dataSource").textContent="📂 내장 데이터 사용 중";
+    document.getElementById('gearDiv').innerHTML=buildGearSVG();
+    buildButtons();
+    // 레이아웃 확정 후 차트 크기 설정 (깜빡임 방지)
+    requestAnimationFrame(function(){
+        requestAnimationFrame(function(){
+            resizeChart();
+            selectItem(ALL_LEAVES[0][0],ALL_LEAVES[0][1]);
+            document.getElementById('chartWrap').classList.add('ready');
+        });
+    });
+    window.addEventListener('resize',function(){resizeChart();drawBars();});
+    fetchGoogleSheet();
+}
+window.addEventListener('load',init);
+</script>
+</body>
+</html>
